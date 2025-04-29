@@ -1,0 +1,42 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Mac Debug Current file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+            "args": [
+                "test.db",
+                // ".dbinfo"
+                // ".tables"
+                // "select coffee from butterscotch"
+                // "select pistachio, chocolate, grape from butterscotch"
+                // "select mango, grape, chocolate from butterscotch where grape = 'Verdie'"
+                // "SELECT id, name FROM superheroes WHERE eye_color = 'Pink Eyes'"
+                "SELECT id, name FROM companies WHERE country = 'eritrea'"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "presentation": {
+                "hidden": false,
+                "group": "",
+                "order": 1
+            },
+            "preLaunchTask": "C/C++: clang++ build active file"
+        },
+        {
+            "name": "CodeLLDB",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+            // "args": ["-arg1", "-arg2"],
+            "preLaunchTask": "C/C++: clang++ build active file"
+
+        }
+    ],
+    "compounds": []
+}
