@@ -19,7 +19,16 @@ constexpr size_t DEFAULT_STRING_RESERVE = 256ULL-8ULL; // Default string capacit
 constexpr size_t DEFAULT_STRING_RESERVE_= 256ULL; // Default string capacity in bytes
 constexpr size_t MIN_CHUNK_SIZE= 256ULL;
 
-#define USE_FREE_LIST 1
+#define _DEBUG_LOG
+
+#ifdef _DEBUG_LOG  // Debug build
+  #define DEBUG_LOG(...) std::cout << __VA_ARGS__ << '\n';
+#else  // Release build
+  #define DEBUG_LOG(...)  // Expands to nothing
+#endif
+
+
+#define USE_FREE_LIST
 
 // MemoryArena class to manage a large block of virtual memory
 class MemoryArena {
@@ -35,9 +44,9 @@ private:
         size_t size;
     };
 
-#if  USE_FREE_LIST    
+#ifdef USE_FREE_LIST
     // Store freelists by size only
-    std::unordered_map<size_t, std::list<MemoryBlock>> freelists;
+    std::unordered_map<size_t, std::vector<MemoryBlock>> freelists;
 #endif  //USE_FREE_LIST
 
 public:
@@ -50,11 +59,10 @@ public:
             throw std::runtime_error("Failed to allocate memory arena");
         }
 
-#if  USE_FREE_LIST    
-        freelists.reserve(1000);
+#ifdef USE_FREE_LIST
+        freelists.reserve(1000); // reserve buckets
 #endif
-        std::cout << "Memory arena initialized with " << (totalSize / TB) 
-                  << " TB at address " << baseAddress << std::endl;
+        DEBUG_LOG("Memory arena initialized with " << (totalSize / TB) << " TB at address " << baseAddress);
     }
     
     ~MemoryArena() {
@@ -73,22 +81,25 @@ public:
         
         // Round up to nearest multiple of SMALL_CHUNK_SIZE bytes
         bytesNeeded = ((bytesNeeded + MIN_CHUNK_SIZE-1ULL) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE; // SMALL_CHUNK_SIZE byte chunk
-        
-#if  USE_FREE_LIST
+
+#ifdef USE_FREE_LIST
         // Check if we have a matching block in the freelist
         auto& blocks = freelists[bytesNeeded];
-        std::cout << "bytesNeeded freelists[" << bytesNeeded << "] blockSize: " << blocks.size() << '\n';
+        // DEBUG_LOG("freelists[" << bytesNeeded << "] bytesNeeded | blockSize: " << blocks.size() << '\n');
         
         if (!blocks.empty())
         {
             // Reuse a freed block
-            MemoryBlock block = blocks.front();
-            blocks.pop_front();
+            MemoryBlock block = blocks.back();
+            blocks.pop_back();
             
-            std::cout << "Reusing memory block of size " << bytesNeeded 
-                      << " bytes (originally for type " << typeid(T).name() << ")" << std::endl;
+            DEBUG_LOG("Reusing memory block of size " << bytesNeeded << " bytes (originally for type " << typeid(T).name() << ")");
             
             return block.address;
+        } else
+        {
+            blocks.reserve(100); // reserve space for _this_size_ freelist reduce reallocations
+            // std::cout << "blocks.reserve(100)\n";
         }
 #endif  //USE_FREE_LIST
         
@@ -105,10 +116,9 @@ public:
         for (size_t offset = 0; offset < bytesNeeded; offset += pageSize) {
             static_cast<char*>(allocated)[offset] = 0;
         }
-#endif        
-        // std::cout << "Allocated " << bytesNeeded << " bytes for type " 
-                //   << typeid(T).name() << " at " << allocated << "\n";
-        
+#endif
+        DEBUG_LOG("Allocated " << bytesNeeded << " bytes for type " << typeid(T).name() << " at " << allocated);
+
         return allocated;
     }
     
@@ -122,14 +132,13 @@ public:
         size_t bytesFreed = n * sizeof(T);
         
         // Add to the freelist by size only
-#if  USE_FREE_LIST
+#ifdef USE_FREE_LIST
         freelists[bytesFreed].push_back({ptr, bytesFreed});
-        std::cout << "bytesFreed freelists[ " << bytesFreed << "] blockSize: " << freelists[bytesFreed].size() << '\n';
+        // DEBUG_LOG("freelists[ " << bytesFreed << "] bytesFreed | blockSize: " << freelists[bytesFreed].size());
 
 #endif  //USE_FREE_LIST
-        
-        // std::cout << "Freed " << bytesFreed << " bytes from type " 
-                //   << typeid(T).name() << " at " << ptr << std::endl;
+
+        DEBUG_LOG("Freed " << bytesFreed << " bytes from type " << typeid(T).name() << " at " << ptr);
     }
     
     // Statistics
@@ -337,7 +346,13 @@ public:
     }
 };
 
-#if 1 // Track std mem allocation
+// #define TRACK_MEMORY_ALLOCATIONS
+#define VECTOR_TEST
+#define STRING_TEST
+#define UM_TEST
+
+
+#ifdef TRACK_MEMORY_ALLOCATIONS // Track std mem allocation
 
 #include <new>     // Required for placement new
 // Track allocation
@@ -369,9 +384,13 @@ void operator delete[](void* ptr) noexcept {
 
 #endif  // Track std mem allocation
 
+
+
 // Example usage
 int main()
 {
+
+
 #if  0 // Check if memory is allocated in multiples of BLOCK_SIZE
     {
         struct Thing{
@@ -423,7 +442,7 @@ int main()
 #endif  // std::unordered_map memory characteristic
     std::cout << " -----------------------------------------------\n";
 
-#if 0
+#ifdef UM_TEST
 std::cout << " ----------[ UnorderedMap ]-------------------------------------\n";
 
     // ArenaUnorderedMap<ArenaString, int> m;
@@ -444,8 +463,7 @@ std::cout << " ----------[ UnorderedMap ]-------------------------------------\n
     std::cout << "Map entry example: " << testMap[42] << std::endl;
 #endif  //0
 
-
-#if  1 // ArenaString test
+#ifdef STRING_TEST // ArenaString test
     std::cout << " ------------[ String Test ]-----------------------------------\n";
 
     ArenaString b = "RahulSinhaRahulSinhaRahulSinhaRahulSinha";
@@ -484,7 +502,7 @@ std::cout << " ----------[ UnorderedMap ]-------------------------------------\n
     // std::cout << "name: " << name << '\n';
     // Create vectors with our custom allocator
 
-#if 1 // ArenaVector Test
+#ifdef VECTOR_TEST // ArenaVector Test
     std::cout << " ------------[ Vector Test ]-----------------------------------\n";
 
     ArenaVector<int> intVector;
