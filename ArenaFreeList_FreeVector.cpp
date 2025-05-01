@@ -1,16 +1,9 @@
-#include <iostream>
 #include <vector>
-#include <memory>
-#include <mutex>
 #include <unordered_map>
-#include <list>
-#include <cstdlib>
-#include <cassert>
 #include <sys/mman.h>
-#include <stdexcept>
-#include <typeinfo>
 
-// Size constants
+//-------------[ CONSTANTS  ]-----------------------------------------------------------------------
+// Tune according to needs.
 constexpr size_t TB = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr size_t DEFAULT_ARENA_SIZE = 64ULL * TB;
 constexpr size_t DEFAULT_BLOCK_BYTES = 8ULL * 1024ULL * 1024ULL; // 8 MB default block size
@@ -18,8 +11,24 @@ constexpr size_t DEFAULT_BLOCK_BYTES = 8ULL * 1024ULL * 1024ULL; // 8 MB default
 constexpr size_t DEFAULT_STRING_RESERVE = 256ULL-8ULL; // Default string capacity in bytes
 constexpr size_t DEFAULT_STRING_RESERVE_= 256ULL; // Default string capacity in bytes
 constexpr size_t MIN_CHUNK_SIZE= 256ULL;
+//-------------[ CONSTANTS  ]-----------------------------------------------------------------------
 
+
+//-------------[ SETTINGS  ]-----------------------------------------------------------------------
 #define _DEBUG_LOG
+// #define MULTI_THREADED_ARENA
+#define USE_FREE_LIST
+//-------------[ SETTINGS  ]-----------------------------------------------------------------------
+
+
+#ifdef _DEBUG_LOG
+#include <iostream>
+#endif
+
+
+#ifdef MULTI_THREADED_ARENA
+#include <mutex>
+#endif
 
 #ifdef _DEBUG_LOG  // Debug build
   #define DEBUG_LOG(...) std::cout << __VA_ARGS__ << '\n';
@@ -28,7 +37,6 @@ constexpr size_t MIN_CHUNK_SIZE= 256ULL;
 #endif
 
 
-#define USE_FREE_LIST
 
 // MemoryArena class to manage a large block of virtual memory
 class MemoryArena {
@@ -36,8 +44,9 @@ private:
     void* baseAddress;
     size_t totalSize;
     size_t usedSize;
+#ifdef MULTI_THREADED_ARENA
     std::mutex allocationMutex;
-
+#endif
     // Memory blocks for freelist
     struct MemoryBlock {
         void* address;
@@ -74,8 +83,9 @@ public:
     
     template<typename T>
     void* allocate(size_t n) {
+#ifdef MULTI_THREADED_ARENA
         std::lock_guard<std::mutex> lock(allocationMutex);
-        
+#endif        
         // Calculate total size needed
         size_t bytesNeeded = n * sizeof(T);
         
@@ -125,9 +135,9 @@ public:
     template<typename T>
     void deallocate(void* ptr, size_t n) {
         if (ptr == nullptr) return;
-        
+#ifdef MULTI_THREADED_ARENA        
         std::lock_guard<std::mutex> lock(allocationMutex);
-        
+#endif
         // Calculate total size
         size_t bytesFreed = n * sizeof(T);
         
