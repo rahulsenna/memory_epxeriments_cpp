@@ -8,6 +8,7 @@
 //-------------[ CONSTANTS  ]-----------------------------------------------------------------------
 // Tune according to needs.
 constexpr size_t TB = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+constexpr size_t MB = 1024ULL * 1024ULL;
 constexpr size_t DEFAULT_ARENA_SIZE = 64ULL * TB;
 constexpr size_t DEFAULT_BLOCK_BYTES = 8ULL * 1024ULL * 1024ULL; // 8 MB default block size
 // constexpr size_t DEFAULT_BLOCK_BYTES = 256ULL; // 8 MB default block size
@@ -25,6 +26,7 @@ constexpr size_t DEFAULT_FREE_LIST_BLOCK_SIZE = 100ULL;
 // #define TRACK_MEMORY_ALLOCATIONS
 // #define INITIALIZE_MEMORY_ARENA
 //-------------[ SETTINGS  ]-----------------------------------------------------------------------
+#include <thread>
 
 
 namespace rs
@@ -48,7 +50,7 @@ extern MemoryArena GLOBAL_ARENA;
 // MemoryArena class to manage a large block of virtual memory
 class MemoryArena
 {
-private:
+public:
     void *base_address;
     size_t total_size;
     size_t used_size;
@@ -67,7 +69,6 @@ private:
     std::unordered_map<size_t, std::vector<MemoryBlock>> freelists;
 #endif // USE_FREE_LIST_ARENA
 
-public:
     MemoryArena(size_t size = DEFAULT_ARENA_SIZE) : total_size(size), used_size(0)
     {
         // Map a large virtual address space without committing physical memory (lazy commit)
@@ -85,12 +86,22 @@ public:
         DEBUG_LOG("Memory arena initialized with " << (total_size / TB) << " TB at address " << base_address);
     }
 
+    MemoryArena(std::uintptr_t address, size_t size)
+        : base_address(reinterpret_cast<void *>(address)), total_size(size), used_size(0)
+    {
+#ifdef USE_FREE_LIST_ARENA
+        freelists.reserve(DEFAULT_FREE_LIST_BUCKET_COUNT); // reserve buckets;
+#endif
+        DEBUG_LOG("Thread-local MemoryArena initialized with " << (total_size / MB) << " MB at address " << base_address);
+    }
+
     ~MemoryArena()
     {
+        DEBUG_LOG("ARENA DESTROYED " << std::this_thread::get_id());
         // Unmap all memory
         if (base_address != MAP_FAILED)
         {
-            munmap(base_address, total_size);
+            munmap(base_address, total_size); // todo:: watch this on different threads // 2. destructors aren't being called on another thread's this class is created with `new`
         }
     }
 
@@ -123,8 +134,8 @@ public:
         }
         else
         {
-            blocks.reserve(DEFAULT_FREE_LIST_BLOCK_SIZE); // reserve space for _this_size_ freelist reduce reallocations
-            // std::cout << "blocks.reserve(100)\n";
+            if (blocks.capacity() < DEFAULT_FREE_LIST_BLOCK_SIZE)
+                blocks.reserve(DEFAULT_FREE_LIST_BLOCK_SIZE); // reserve space for _this_size_ freelist reduce reallocations
         }
 #endif // USE_FREE_LIST_ARENA
 
@@ -171,14 +182,41 @@ public:
     }
 
     // Statistics
-    size_t getUsedSize() const { return used_size; }
-    size_t getTotalSize() const { return total_size; }
-    size_t getFreeSize() const { return total_size - used_size; }
+    size_t get_free_size() const { return total_size - used_size; }
+    void reset()
+    {
+        used_size = 0;
+        freelists.clear();
+    }
 };
+
+extern std::thread::id MAIN_THREAD_ID;
+inline MemoryArena &get_thread_arena()
+{
+    thread_local MemoryArena* arena = nullptr;
+    if (!arena)
+    {
+        DEBUG_LOG("CREATING A NEW ARENA | ThreadID: " << std::this_thread::get_id());
+        if (std::this_thread::get_id() == MAIN_THREAD_ID)
+        {
+            // Main thread gets the global arena
+            arena = &GLOBAL_ARENA;
+        }
+        else
+        {
+            // Other threads allocate 100MB chunks from the main arena
+            void* block = GLOBAL_ARENA.allocate<uint8_t>(MB*100ULL);
+            arena = new MemoryArena(reinterpret_cast<std::uintptr_t>(block), MB*100ULL);
+        }
+    }
+    return *arena;
+}
 
 #ifdef INITIALIZE_MEMORY_ARENA
 // Global memory arena instance
 MemoryArena GLOBAL_ARENA;
+std::thread::id MAIN_THREAD_ID = std::this_thread::get_id();
+
 #endif
 // Custom allocator for STL containers that uses our memory arena
 template <typename T>
@@ -223,7 +261,8 @@ public:
     // Allocation function that calls our arena
     T *allocate(size_type n)
     {
-        return static_cast<T *>(GLOBAL_ARENA.allocate<T>(n));
+        // return static_cast<T *>(GLOBAL_ARENA.allocate<T>(n));
+        return static_cast<T *>(rs::get_thread_arena().allocate<T>(n));
     }
 
     // Deallocation function that returns memory to our arena's freelist
@@ -341,9 +380,6 @@ public:
     }
 };
 
-// Hash function specialization for string
-// Hash function specialization for rs::string
-
 
 // Specialized unordered map implementation with our arena allocator
 template <typename K, typename V, typename Hash = std::hash<K>, typename KeyEqual = std::equal_to<K>>
@@ -412,6 +448,8 @@ void operator delete[](void *ptr) noexcept
 #endif // TRACK_MEMORY_ALLOCATIONS
 }
 
+
+// Hash function specialization for rs::string
 namespace std
 {
     template <>
@@ -440,7 +478,7 @@ struct temp_arena
 inline temp_arena begin_temp_memory(size_t size)
 {
     temp_arena result;
-    result.base = (uint8_t *)rs::GLOBAL_ARENA.allocate<uint8_t>(size);
+    result.base = (uint8_t *)rs::get_thread_arena().allocate<uint8_t>(size);
 
     result.used  = 0;
     result.capacity = size;
@@ -449,7 +487,7 @@ inline temp_arena begin_temp_memory(size_t size)
 
 inline void end_temp_memory(temp_arena &arena)
 {
-    rs::GLOBAL_ARENA.deallocate<uint8_t>(arena.base,arena.capacity);
+    rs::get_thread_arena().deallocate<uint8_t>(arena.base,arena.capacity);
 }
 
 inline void *push_size_(temp_arena &arena, size_t size)
@@ -461,7 +499,7 @@ inline void *push_size_(temp_arena &arena, size_t size)
 }
 inline void *push_size_(size_t size)
 {
-    return (rs::GLOBAL_ARENA.allocate<uint8_t>(1));
+    return (rs::get_thread_arena().allocate<uint8_t>(1));
 }
 
 
