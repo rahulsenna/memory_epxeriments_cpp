@@ -7,4 +7,6 @@
         "__hash_table": "cpp",
         "version": "cpp"
     }
+		,
+		"chat.disableAIFeatures": true
 }

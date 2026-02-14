@@ -15,7 +15,7 @@
             "windowsSdkVersion": "10.0.22621.0",
             "cStandard": "c17",
             "cppStandard": "c++23",
-            "intelliSenseMode": "windows-msvc-x64",
+            "intelliSenseMode": "windows-msvc-x64"
             
         },
         {
@@ -28,7 +28,7 @@
                 "UNICODE",
                 "_UNICODE"
             ],
-
+						"compilerArgs": ["-fexperimental-library"],
             "cStandard": "c17",
             "cppStandard": "c++23",
             "intelliSenseMode": "macos-clang-arm64"

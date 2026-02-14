@@ -9,6 +9,7 @@
                 "-std=c++23",
                 "-fcolor-diagnostics",
                 "-fansi-escape-codes",
+								"-fexperimental-library",
                 "-g",
                 // "-o3",
                 // "-fsanitize=address",
