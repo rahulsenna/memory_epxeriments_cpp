@@ -22,13 +22,14 @@ void foo() {
 		std::cout << "v.size(): " << v.size() << '\n';
 
     // Explicit arena
-    ArenaScope scope(5000*sizeof(float));
+    ArenaScope scope(1001*sizeof(float));
     arena::Vector<float> vf{ arena::Allocator<float>(&scope) };
-    vf.push_back(3.14f);
-		for (int i = 0; i < 999; ++i)
-		{
-			vf.push_back(i);
-		}
+		vf.reserve(1200);
+    // vf.push_back(3.14f);
+		// for (int i = 0; i < 999; ++i)
+		// {
+		// 	vf.push_back(i);
+		// }
 		std::cout << "vf.size(): " << vf.size() << '\n';
 }
 

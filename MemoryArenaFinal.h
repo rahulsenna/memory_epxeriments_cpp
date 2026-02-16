@@ -2,7 +2,6 @@
 #define _MEMORY_ARENA_
 
 #include <vector>
-#include <unordered_map>
 #include <sys/mman.h>
 
 //-------------[ CONSTANTS  ]-----------------------------------------------------------------------
@@ -15,8 +14,8 @@ constexpr size_t DEFAULT_BLOCK_BYTES = 8ULL * 1024ULL * 1024ULL; // 8 MB default
 constexpr size_t DEFAULT_STRING_RESERVE = 256ULL - 8ULL; // Default string capacity in bytes
 constexpr size_t DEFAULT_STRING_RESERVE_ = 256ULL;       // Default string capacity in bytes
 constexpr size_t MIN_CHUNK_SIZE = 256ULL;
-constexpr size_t DEFAULT_FREE_LIST_BUCKET_COUNT = 1000ULL;
-constexpr size_t DEFAULT_FREE_LIST_BLOCK_SIZE = 100ULL;
+
+constexpr size_t DEFAULT_FREE_LIST_SIZE = 100ULL;
 //-------------[ CONSTANTS  ]-----------------------------------------------------------------------
 
 //-------------[ SETTINGS  ]-----------------------------------------------------------------------
@@ -57,16 +56,17 @@ public:
 #ifdef MULTI_THREADED_ARENA
     std::mutex allocationMutex;
 #endif
-    // Memory blocks for freelist
-    struct MemoryBlock
-    {
-        void *address;
-        size_t size;
-    };
 
 #ifdef USE_FREE_LIST_ARENA
-    // Store freelists by size only
-    std::unordered_map<size_t, std::vector<MemoryBlock>> freelists;
+    // Intrusive singly-linked list node stored inside the free memory itself
+		struct FreeNode
+		{
+			FreeNode *next;
+		};
+
+		// Flat array of freelist heads - index 0 corresponds to MIN_CHUNK_SIZE (256 bytes)
+    // Index n corresponds to (n+1) * MIN_CHUNK_SIZE bytes
+    std::vector<FreeNode*> freelists;
 #endif // USE_FREE_LIST_ARENA
 
     MemoryArena(size_t size = DEFAULT_ARENA_SIZE) : total_size(size), used_size(0)
@@ -81,7 +81,7 @@ public:
         }
 
 #ifdef USE_FREE_LIST_ARENA
-        freelists.reserve(DEFAULT_FREE_LIST_BUCKET_COUNT); // reserve buckets;
+        freelists.resize(DEFAULT_FREE_LIST_SIZE, nullptr);
 #endif
         DEBUG_LOG("Memory arena initialized with " << (total_size / TB) << " TB at address " << base_address);
     }
@@ -90,7 +90,7 @@ public:
         : base_address(reinterpret_cast<void *>(address)), total_size(size), used_size(0)
     {
 #ifdef USE_FREE_LIST_ARENA
-        freelists.reserve(DEFAULT_FREE_LIST_BUCKET_COUNT); // reserve buckets;
+        freelists.resize(DEFAULT_FREE_LIST_SIZE, nullptr);
 #endif
         DEBUG_LOG("Thread-local MemoryArena initialized with " << (total_size / MB) << " MB at address " << base_address);
     }
@@ -118,24 +118,22 @@ public:
         bytes_needed = ((bytes_needed + MIN_CHUNK_SIZE - 1ULL) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE; // SMALL_CHUNK_SIZE byte chunk
 
 #ifdef USE_FREE_LIST_ARENA
-        // Check if we have a matching block in the freelist
-        auto &blocks = freelists[bytes_needed];
-        // DEBUG_LOG("freelists[" << bytes_needed << "] bytes_needed | blockSize: " << blocks.size() << '\n');
-
-        if (!blocks.empty())
-        {
-            // Reuse a freed block
-            MemoryBlock block = blocks.back();
-            blocks.pop_back();
-
-            DEBUG_LOG("Reusing memory block of size " << bytes_needed << " bytes (originally for type " << typeid(T).name() << ")");
-
-            return block.address;
+        // Calculate bucket index for the rounded size
+        size_t bucket_index = (bytes_needed / MIN_CHUNK_SIZE) - 1;
+        
+        // Ensure freelists array is large enough (dynamic growth)
+        if (bucket_index >= freelists.size()) {
+            freelists.resize(bucket_index + 1, nullptr);
         }
-        else
-        {
-            if (blocks.capacity() < DEFAULT_FREE_LIST_BLOCK_SIZE)
-                blocks.reserve(DEFAULT_FREE_LIST_BLOCK_SIZE); // reserve space for _this_size_ freelist reduce reallocations
+
+        // Check if we have a free block of this exact size
+        FreeNode* node = freelists[bucket_index];
+        if (node) {
+            // Pop from freelist (LIFO for cache locality)
+            freelists[bucket_index] = node->next;
+            
+            DEBUG_LOG("Reusing memory block of size " << bytes_needed << " bytes (originally for type " << typeid(T).name() << ")");
+            return reinterpret_cast<void*>(node);
         }
 #endif // USE_FREE_LIST_ARENA
 
@@ -171,11 +169,18 @@ public:
         size_t bytesFreed = n * sizeof(T);
         bytesFreed = ((bytesFreed + MIN_CHUNK_SIZE - 1ULL) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE; // SMALL_CHUNK_SIZE byte chunk
 
-        // Add to the freelist by size only
 #ifdef USE_FREE_LIST_ARENA
-        freelists[bytesFreed].push_back({ptr, bytesFreed});
-        // DEBUG_LOG("freelists[ " << bytesFreed << "] bytesFreed | blockSize: " << freelists[bytesFreed].size());
+        size_t bucket_index = (bytesFreed / MIN_CHUNK_SIZE) - 1;
+        
+        // Ensure freelists array is large enough
+        if (bucket_index >= freelists.size()) {
+            freelists.resize(bucket_index + 1, nullptr);
+        }
 
+        // Push onto freelist (LIFO - most recently freed is first to be reused)
+        FreeNode* node = static_cast<FreeNode*>(ptr);
+        node->next = freelists[bucket_index];
+        freelists[bucket_index] = node;
 #endif // USE_FREE_LIST_ARENA
 
         DEBUG_LOG("Freed " << bytesFreed << " bytes from type " << typeid(T).name() << " at " << ptr);
@@ -186,7 +191,9 @@ public:
     void reset()
     {
         used_size = 0;
-        freelists.clear();
+#ifdef USE_FREE_LIST_ARENA
+        std::fill(freelists.begin(), freelists.end(), nullptr);
+#endif
     }
 };
 

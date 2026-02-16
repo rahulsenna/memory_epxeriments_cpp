@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <cassert>
 #include <new>
 #include <limits>
 #include <thread>
@@ -320,13 +321,16 @@ namespace arena
 
 		T *allocate(std::size_t n)
 		{
+			/* 
 			if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
 			{
 				throw std::bad_array_new_length();
-			}
+			} */
+			assert(n < std::numeric_limits<std::size_t>::max() / sizeof(T) && "bad_array_new_length()")
 			void *p = arena_alloc(arena, n * sizeof(T), alignof(T));
-			if (!p)
-				throw std::bad_alloc();
+			assert(p != nullptr && "bad_alloc()");
+			// if (!p)
+				// throw std::bad_alloc();
 			return static_cast<T *>(p);
 		}
 
