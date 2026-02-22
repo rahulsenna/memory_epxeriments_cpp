@@ -1,7 +1,7 @@
 #pragma once
 
-#include "stlAdaptor.hpp"
-#include "freeListAllocator.hpp"
+#include "stladaptor.hpp"
+#include "freelist_allocator.hpp"
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
@@ -47,3 +47,18 @@ using FreeListString = FreeListBasicString<char>;
 using FreeListWString = FreeListBasicString<wchar_t>;
 using FreeListU16String = FreeListBasicString<char16_t>;
 using FreeListU32String = FreeListBasicString<char32_t>;
+
+using String = FreeListString;
+
+template <typename T>
+FreeListVector<T> Vector(FreeListAllocator &allocator)
+{
+  return FreeListVector<T>(STLAdaptor<T, FreeListAllocator>(allocator));
+}
+
+template <typename K, typename V>
+FreeListUnorderedMap<K, V> UnorderedMap(FreeListAllocator &allocator)
+{
+  return FreeListUnorderedMap<K, V>(
+      STLAdaptor<std::pair<const K, V>, FreeListAllocator>(allocator));
+}
