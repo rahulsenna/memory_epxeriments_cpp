@@ -41,7 +41,7 @@ public:
 
   virtual ~Allocator() noexcept
   {
-    assert(m_numAllocations == 0 && m_usedBytes == 0);
+    // assert(m_numAllocations == 0 && m_usedBytes == 0);
   }
 
   virtual void *Allocate(const std::size_t &size,

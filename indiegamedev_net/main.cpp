@@ -1,10 +1,16 @@
 #include <iostream>
 #include <cstdlib>
+#include <sstream>
 #include "stlAliases.hpp"
+
+struct THING
+{
+  int a[16];
+};
 
 int main()
 {
-	const std::size_t memSize = 1024 * 1024; // 1 MiB
+	const std::size_t memSize = 1024 * 1024 *1024; // 1 GiB
 	void *memStart = std::malloc(memSize);
 
 	FreeListAllocator allocator(memSize, memStart);
@@ -17,7 +23,25 @@ int main()
 		// FreeListVector<int> vec(adaptor);
 
 		for (int i = 0; i < 100; ++i)
-			vec.push_back(i * i);
+    {
+      int freeBlocks = 1;
+      auto f = allocator.m_freeBlocks;
+      std::ostringstream iss;
+      while (f)
+      {
+        iss << freeBlocks << ' ' <<  (void*)f << ' ' << f->size << ' ';
+        freeBlocks++;
+        f = f->next;
+      }
+
+      vec.push_back(i * i);
+      THING *a = (THING*)allocator.Allocate(sizeof(THING), alignof(THING));
+      // void *a;
+      printf("i: %d | vec.data(): %p | a: %p | allocations: %lu | freeBlocks(%d): %s\n", i, vec.data(), a, allocator.GetNumAllocation(), freeBlocks-1, iss.str().c_str());
+      // allocator.Free(a);
+      
+    }
+			
 
 		std::cout << "Vector size: " << vec.size() << "\n";
 		std::cout << "Used memory: " << allocator.GetUsed() << " bytes\n";
@@ -44,6 +68,13 @@ int main()
 			std::cout << k << " -> " << v << "\n";
 
 		std::cout << "Used memory: " << allocator.GetUsed() << " bytes\n";
+
+    auto f = allocator.m_freeBlocks;
+      while(f)
+      {
+        printf("f: %p | f->size: %lu\n", f, f->size);
+        f = f->next;
+      }
 	}
 
 	std::cout << "After map destruction: " << allocator.GetUsed() << " bytes\n";

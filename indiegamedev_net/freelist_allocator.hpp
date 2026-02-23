@@ -169,6 +169,6 @@ public:
     m_usedBytes -= blockSize;
   }
 
-private:
+
   FreeBlock *m_freeBlocks;
 };
